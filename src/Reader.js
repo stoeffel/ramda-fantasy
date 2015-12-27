@@ -1,5 +1,10 @@
 var R = require('ramda');
 
+//. ## Reader
+//.
+//. A data type to allow reading values from a shared environement.
+//.
+
 
 function Reader(run) {
   if (!(this instanceof Reader)) {

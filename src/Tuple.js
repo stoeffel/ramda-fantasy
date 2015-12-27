@@ -1,5 +1,9 @@
 var R = require('ramda');
 
+//. ## Tuble
+//.
+//. A data type that holds a tuple and exposes a monadic api.
+//.
 
 function Tuple(x, y) {
   switch (arguments.length) {

@@ -2,6 +2,13 @@ var R = require('ramda');
 
 var util = require('./internal/util.js');
 
+
+//. ## Maybe
+//.
+//. A data type that holds an optional value and exposes a monadic api.
+//.
+
+
 function Maybe(x) {
   return x == null ? _nothing : Maybe.Just(x);
 }

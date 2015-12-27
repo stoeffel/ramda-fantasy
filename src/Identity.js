@@ -1,18 +1,21 @@
 var R = require('ramda');
-
 var util = require('./internal/util');
 
 
-/**
- * A data type that holds a value and exposes a monadic api.
- */
+//. ## Identity
+//.
+//. A data type that holds a value and exposes a monadic api.
+//.
+//. ```js
+//. Identity(3).map(R.inc); // => Identity(4)
+//. ```
+//.
 
-/**
- * Constructs a new `Identity[a]` data type that holds a single
- * value `a`.
- * @param {*} a Value of any type
- * @sig a -> Identity[a]
- */
+//# Identity :: a -> Identity[a]
+//.
+//. Constructs a new `Identity[a]` data type that holds a single
+//. value `a`.
+//.
 function Identity(x) {
   if (!(this instanceof Identity)) {
     return new Identity(x);
@@ -20,58 +23,47 @@ function Identity(x) {
   this.value = x;
 }
 
-/**
- * Applicative specification. Creates a new `Identity[a]` holding the value `a`.
- * @param {*} a Value of any type
- * @returns Identity[a]
- * @sig a -> Identity[a]
- */
+//# Identity.of :: a -> Identity[a]
+//.
+//. [Applicative specification][applicative-spec]. Creates a new `Identity[a]` holding the value `a`.
+//.
 Identity.of = function(x) {
   return new Identity(x);
 };
 Identity.prototype.of = Identity.of;
 
-/**
- * Functor specification. Creates a new `Identity[a]` mapping function `f` onto
- * `a` returning any value b.
- * @param {Function} f Maps `a` to any value `b`
- * @returns Identity[b]
- * @sig @Identity[a] => (a -> b) -> Identity[b]
- */
+//# Identity.prototype.map :: Identity[a] => (a -> b) -> Identity[b]
+//.
+//. [Functor specification][functor-spec]. Creates a new `Identity[a]` mapping function `f` onto
+//. `a` returning any value b.
+//.
 Identity.prototype.map = function(f) {
   return new Identity(f(this.value));
 };
 
-/**
- * Apply specification. Applies the function inside the `Identity[a]`
- * type to another applicative type.
- * @param {Applicative[a]} app Applicative that will apply its function
- * @returns Applicative[b]
- * @sig (Identity[a -> b], f: Applicative[_]) => f[a] -> f[b]
- */
+//# Identity.prototype.ap :: (Identity[a -> b], f: Applicative[_]) => f[a] -> f[b]
+//.
+//. [Apply specification][apply-spec]. Applies the function inside the `Identity[a]`
+//. type to another applicative type.
+//.
 Identity.prototype.ap = function(app) {
   return app.map(this.value);
 };
 
-/**
- * Chain specification. Transforms the value of the `Identity[a]`
- * type using an unary function to monads. The `Identity[a]` type
- * should contain a function, otherwise an error is thrown.
- *
- * @param {Function} fn Transforms `a` into a `Monad[b]`
- * @returns Monad[b]
- * @sig (Identity[a], m: Monad[_]) => (a -> m[b]) -> m[b]
- */
+//# Identity.prototype.chain :: (Identity[a], m: Monad[_]) => (a -> m[b]) -> m[b]
+//.
+//. [Chain specification][chain-spec]. Transforms the value of the `Identity[a]`
+//. type using an unary function to monads. The `Identity[a]` type
+//. should contain a function, otherwise an error is thrown.
+//.
 Identity.prototype.chain = function(fn) {
   return fn(this.value);
 };
 
-/**
- * Returns the value of `Identity[a]`
- *
- * @returns a
- * @sig (Identity[a]) => a
- */
+//# Identity.prototype.get :: (Identity[a]) => a
+//.
+//. Returns the value of `Identity[a]`
+//.
 Identity.prototype.get = function() {
   return this.value;
 };

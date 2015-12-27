@@ -2,6 +2,11 @@ var R = require('ramda');
 
 module.exports = IO;
 
+//. ## IO
+//.
+//. A data type that holds a side-effect and exposes a monadic api.
+//.
+
 var compose = R.compose;
 
 function IO(fn) {

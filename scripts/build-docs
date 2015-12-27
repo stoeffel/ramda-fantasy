@@ -1,0 +1,18 @@
+#!/bin/bash
+
+echo '# API'
+echo ''
+echo ''
+
+for f in src/*.js; do
+  transcribe --url 'https://github.com/stoeffel/ramda-fantasy/blob/docs/{filename}#L{line}' --heading-level 6 -- $f
+  echo ''
+  echo ''
+  echo ''
+done
+
+# links to the fantasy-land spec
+echo '[functor-spec]: https://github.com/fantasyland/fantasy-land#functor'
+echo '[apply-spec]: https://github.com/fantasyland/fantasy-land#apply'
+echo '[applicative-spec]: https://github.com/fantasyland/fantasy-land#applicative'
+echo '[chain-spec]: https://github.com/fantasyland/fantasy-land#chain'

@@ -1,5 +1,10 @@
 var R = require('ramda');
 
+//. ## Future
+//.
+//. A data type that holds an eventual value and exposes a monadic api.
+//.
+
 function jail(handler, f){
   return function(a){
     try{

@@ -3,6 +3,12 @@ var R = require('ramda');
 var util = require('./internal/util');
 
 
+//. ## Either
+//.
+//. A data type that holds either a `Left` or a `Right` value and exposes a monadic api.
+//.
+
+
 function Either(left, right) {
   switch (arguments.length) {
     case 0:

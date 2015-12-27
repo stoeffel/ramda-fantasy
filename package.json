@@ -27,7 +27,8 @@
     "release-major": "xyz --repo git@github.com:ramda/ramda-fantasy.git --increment major",
     "release-minor": "xyz --repo git@github.com:ramda/ramda-fantasy.git --increment minor",
     "release-patch": "xyz --repo git@github.com:ramda/ramda-fantasy.git --increment patch",
-    "test": "mocha"
+    "test": "mocha",
+    "docs": "./scripts/build-docs > ./API.md"
   },
   "dependencies": {
     "ramda": ">=0.15.0 <=0.18.0"
@@ -37,6 +38,7 @@
     "jshint": "~2.7.0",
     "jsverify": "^0.7.1",
     "mocha": "^2.1.0",
+    "transcribe": "^0.3.0",
     "uglify-js": "2.4.x",
     "xyz": "0.5.x"
   }

@@ -1,0 +1,689 @@
+var R = require('ramda');
+
+var util = require('./internal/util');
+
+
+function Either(left, right) {
+  switch (arguments.length) {
+    case 0:
+      throw new TypeError('no arguments to Either');
+    case 1:
+      return function(right) {
+        return right == null ? Either.Left(left) : Either.Right(right);
+      };
+    default:
+      return right == null ? Either.Left(left) : Either.Right(right);
+  }
+}
+
+Either.prototype.map = util.returnThis;
+
+Either.of = Either.prototype.of = function(value) {
+  return Either.Right(value);
+};
+
+Either.prototype.chain = util.returnThis; // throw?
+
+Either.equals = Either.prototype.equals = util.getEquals(Either);
+
+Either.either = R.curry(function either(leftFn, rightFn, e) {
+  if (e instanceof _Left) {
+    return leftFn(e.value);
+  } else if (e instanceof _Right) {
+    return rightFn(e.value);
+  } else {
+    throw new TypeError('invalid type given to Either.either');
+  }
+});
+
+
+// Right
+function _Right(x) {
+  this.value = x;
+}
+util.extend(_Right, Either);
+
+_Right.prototype.map = function(fn) {
+  return new _Right(fn(this.value));
+};
+
+_Right.prototype.ap = function(that) {
+  return that.map(this.value);
+};
+
+_Right.prototype.chain = function(f) {
+  return f(this.value);
+};
+
+_Right.prototype.bimap = function(_, f) {
+  return new _Right(f(this.value));
+};
+
+_Right.prototype.extend = function(f) {
+  return new _Right(f(this));
+};
+
+_Right.prototype.toString = function() {
+  return 'Either.Right(' + R.toString(this.value) + ')';
+};
+
+Either.Right = function(value) {
+  return new _Right(value);
+};
+
+
+// Left
+function _Left(x) {
+  this.value = x;
+}
+util.extend(_Left, Either);
+
+_Left.prototype.ap = util.returnThis;
+
+_Left.prototype.bimap = function(f) {
+  return new _Left(f(this.value));
+};
+
+_Left.prototype.extend = util.returnThis;
+
+_Left.prototype.toString = function() {
+  return 'Either.Left(' + R.toString(this.value) + ')';
+};
+
+Either.Left = function(value) {
+  return new _Left(value);
+};
+
+
+module.exports = Either;
+var R = require('ramda');
+
+function jail(handler, f){
+  return function(a){
+    try{
+      return f(a);
+    } catch(err) {
+      handler(err);
+    }
+  };
+}
+
+// `f` is a function that takes two function arguments: `reject` (failure) and `resolve` (success)
+function Future(f) {
+  if (!(this instanceof Future)) {
+    return new Future(f);
+  }
+  this._fork = f;
+}
+
+Future.prototype.fork = function(reject, resolve) {
+  this._fork(reject, jail(reject, resolve));
+};
+
+// functor
+Future.prototype.map = function(f) {
+  return this.chain(function(a) { return Future.of(f(a)); });
+};
+
+// apply
+Future.prototype.ap = function(m) {
+  var self = this;
+
+  return new Future(function(rej, res) {
+    var applyFn, val;
+    var doReject = R.once(rej);
+
+    var resolveIfDone = jail(doReject, function() {
+      if (applyFn != null && val != null) {
+        return res(applyFn(val));
+      }
+    });
+
+    self._fork(doReject, function(fn) {
+      applyFn = fn;
+      resolveIfDone();
+    });
+
+    m._fork(doReject, function(v) {
+      val = v;
+      resolveIfDone();
+    });
+
+  });
+
+};
+
+// applicative
+Future.of = function(x) {
+  // should include a default rejection?
+  return new Future(function(_, resolve) { return resolve(x); });
+};
+
+Future.prototype.of = Future.of;
+
+// chain
+//  f must be a function which returns a value
+//  f must return a value of the same Chain
+//  chain must return a value of the same Chain
+//:: Future a, b => (b -> Future c) -> Future c
+Future.prototype.chain = function(f) {  // Sorella's:
+  return new Future(function(reject, resolve) {
+    return this._fork(
+      function(a) { return reject(a); },
+      jail(reject, function(b) { return f(b)._fork(reject, resolve); })
+    );
+  }.bind(this));
+};
+
+// chainReject
+// Like chain but operates on the reject instead of the resolve case.
+//:: Future a, b => (a -> Future c) -> Future c
+Future.prototype.chainReject = function(f) {
+  return new Future(function(reject, resolve) {
+    return this._fork(
+      jail(reject, function(a) { return f(a)._fork(reject, resolve); }),
+      function(b) { return resolve(b); }
+    );
+  }.bind(this));
+};
+
+// monad
+// A value that implements the Monad specification must also implement the Applicative and Chain specifications.
+// see above.
+
+Future.prototype.bimap = function(errFn, successFn) {
+  var self = this;
+  return new Future(function(reject, resolve) {
+    self._fork(
+      jail(reject, function(err) { reject(errFn(err)); }),
+      jail(reject, function(val) { resolve(successFn(val)); })
+    );
+  });
+};
+
+Future.reject = function(val) {
+  return new Future(function(reject) {
+    reject(val);
+  });
+};
+
+Future.prototype.toString = function() {
+  return 'Future(' + R.toString(this._fork) + ')';
+};
+
+Future.cache = function(f) {
+  var status = 'IDLE';
+  var listeners = [];
+  var cachedValue;
+
+  var handleCompletion = R.curry(function(newStatus, cb, val) {
+    status = newStatus;
+    cachedValue = val;
+    cb(val);
+    R.forEach(function(listener) {
+      listener[status](cachedValue);
+    }, listeners);
+  });
+
+  function addListeners(reject, resolve) {
+    listeners.push({ REJECTED: reject, RESOLVED: resolve } );
+  }
+
+  function doResolve(reject, resolve) {
+    status = 'PENDING';
+    return f._fork(
+      handleCompletion('REJECTED', reject),
+      handleCompletion('RESOLVED', resolve)
+    );
+  }
+
+  return new Future(function(reject, resolve) {
+
+    switch(status) {
+      case 'IDLE': doResolve(reject, resolve); break;
+      case 'PENDING': addListeners(reject, resolve); break;
+      case 'REJECTED': reject(cachedValue); break;
+      case 'RESOLVED': resolve(cachedValue); break;
+    }
+
+  });
+};
+
+module.exports = Future;
+var R = require('ramda');
+
+module.exports = IO;
+
+var compose = R.compose;
+
+function IO(fn) {
+  if (!(this instanceof IO)) {
+    return new IO(fn);
+  }
+  this.fn = fn;
+}
+
+// `f` must return an IO
+IO.prototype.chain = function(f) {
+  var io = this;
+  return new IO(function() {
+    var next = f(io.fn.apply(io, arguments));
+    return next.fn.apply(next, arguments);
+  });
+};
+
+IO.prototype.map = function(f) {
+  var io = this;
+  return new IO(compose(f, io.fn));
+};
+
+// `this` IO must wrap a function `f` that takes an IO (`thatIo`) as input
+// `f` must return an IO
+IO.prototype.ap = function(thatIo) {
+  return this.chain(function(f) {
+    return thatIo.map(f);
+  });
+};
+
+IO.runIO = function(io) {
+  return io.runIO.apply(io, [].slice.call(arguments, 1));
+};
+
+IO.prototype.runIO = function() {
+  return this.fn.apply(this, arguments);
+};
+
+IO.prototype.of = function(x) {
+  return new IO(function() { return x; });
+};
+
+IO.of = IO.prototype.of;
+
+IO.prototype.toString = function() {
+  return 'IO(' + R.toString(this.fn) + ')';
+};
+var R = require('ramda');
+
+var util = require('./internal/util');
+
+
+//# Identity
+//.
+//. A data type that holds a value and exposes a monadic api.
+//
+
+/**
+ * Constructs a new `Identity[a]` data type that holds a single
+ * value `a`.
+ * @param {*} a Value of any type
+ * @sig a -> Identity[a]
+ */
+function Identity(x) {
+  if (!(this instanceof Identity)) {
+    return new Identity(x);
+  }
+  this.value = x;
+}
+
+/**
+ * Applicative specification. Creates a new `Identity[a]` holding the value `a`.
+ * @param {*} a Value of any type
+ * @returns Identity[a]
+ * @sig a -> Identity[a]
+ */
+Identity.of = function(x) {
+  return new Identity(x);
+};
+Identity.prototype.of = Identity.of;
+
+/**
+ * Functor specification. Creates a new `Identity[a]` mapping function `f` onto
+ * `a` returning any value b.
+ * @param {Function} f Maps `a` to any value `b`
+ * @returns Identity[b]
+ * @sig @Identity[a] => (a -> b) -> Identity[b]
+ */
+Identity.prototype.map = function(f) {
+  return new Identity(f(this.value));
+};
+
+/**
+ * Apply specification. Applies the function inside the `Identity[a]`
+ * type to another applicative type.
+ * @param {Applicative[a]} app Applicative that will apply its function
+ * @returns Applicative[b]
+ * @sig (Identity[a -> b], f: Applicative[_]) => f[a] -> f[b]
+ */
+Identity.prototype.ap = function(app) {
+  return app.map(this.value);
+};
+
+/**
+ * Chain specification. Transforms the value of the `Identity[a]`
+ * type using an unary function to monads. The `Identity[a]` type
+ * should contain a function, otherwise an error is thrown.
+ *
+ * @param {Function} fn Transforms `a` into a `Monad[b]`
+ * @returns Monad[b]
+ * @sig (Identity[a], m: Monad[_]) => (a -> m[b]) -> m[b]
+ */
+Identity.prototype.chain = function(fn) {
+  return fn(this.value);
+};
+
+/**
+ * Returns the value of `Identity[a]`
+ *
+ * @returns a
+ * @sig (Identity[a]) => a
+ */
+Identity.prototype.get = function() {
+  return this.value;
+};
+
+// equality method to enable testing
+Identity.prototype.equals = util.getEquals(Identity);
+
+Identity.prototype.toString = function() {
+  return 'Identity(' + R.toString(this.value) + ')';
+};
+
+module.exports = Identity;
+var R = require('ramda');
+
+var util = require('./internal/util.js');
+
+function Maybe(x) {
+  return x == null ? _nothing : Maybe.Just(x);
+}
+
+function _Just(x) {
+  this.value = x;
+}
+util.extend(_Just, Maybe);
+
+function _Nothing() {}
+util.extend(_Nothing, Maybe);
+
+var _nothing = new _Nothing();
+
+Maybe.Nothing = function() {
+  return _nothing;
+};
+
+Maybe.Just = function(x) {
+  return new _Just(x);
+};
+
+Maybe.of = Maybe.Just;
+
+Maybe.prototype.of = Maybe.Just;
+
+Maybe.isJust = function(x) {
+  return x instanceof _Just;
+};
+
+Maybe.isNothing = function(x) {
+  return x === _nothing;
+};
+
+Maybe.maybe = R.curry(function(nothingVal, justFn, m) {
+  return m.reduce(function(_, x) {
+    return justFn(x);
+  }, nothingVal);
+});
+
+// functor
+_Just.prototype.map = function(f) {
+  return this.of(f(this.value));
+};
+
+_Nothing.prototype.map = util.returnThis;
+
+// apply
+// takes a Maybe that wraps a function (`app`) and applies its `map`
+// method to this Maybe's value, which must be a function.
+_Just.prototype.ap = function(m) {
+  return m.map(this.value);
+};
+
+_Nothing.prototype.ap = util.returnThis;
+
+// applicative
+// `of` inherited from `Maybe`
+
+
+// chain
+//  f must be a function which returns a value
+//  f must return a value of the same Chain
+//  chain must return a value of the same Chain
+_Just.prototype.chain = util.baseMap;
+
+_Nothing.prototype.chain = util.returnThis;
+
+
+//
+_Just.prototype.datatype = _Just;
+
+_Nothing.prototype.datatype = _Nothing;
+
+// monad
+// A value that implements the Monad specification must also implement the Applicative and Chain specifications.
+// see above.
+
+// equality method to enable testing
+_Just.prototype.equals = util.getEquals(_Just);
+
+_Nothing.prototype.equals = function(that) {
+  return that === _nothing;
+};
+
+Maybe.prototype.isNothing = function() {
+  return this === _nothing;
+};
+
+Maybe.prototype.isJust = function() {
+  return this instanceof _Just;
+};
+
+_Just.prototype.getOrElse = function() {
+  return this.value;
+};
+
+_Nothing.prototype.getOrElse = function(a) {
+  return a;
+};
+
+_Just.prototype.reduce = function(f, x) {
+  return f(x, this.value);
+};
+
+_Nothing.prototype.reduce = function(f, x) {
+  return x;
+};
+
+_Just.prototype.toString = function() {
+  return 'Maybe.Just(' + R.toString(this.value) + ')';
+};
+
+_Nothing.prototype.toString = function() {
+  return 'Maybe.Nothing()';
+};
+
+module.exports = Maybe;
+var R = require('ramda');
+
+
+function Reader(run) {
+  if (!(this instanceof Reader)) {
+    return new Reader(run);
+  }
+  this.run = run;
+}
+
+Reader.run = function(reader) {
+  return reader.run.apply(reader, [].slice.call(arguments, 1));
+};
+
+Reader.prototype.chain = function(f) {
+  var reader = this;
+  return new Reader(function(r) {
+    return f(reader.run(r)).run(r);
+  });
+};
+
+Reader.prototype.ap = function(a) {
+  return this.chain(function(f) {
+    return a.map(f);
+  });
+};
+
+Reader.prototype.map = function(f) {
+  return this.chain(function(a) {
+    return Reader.of(f(a));
+  });
+};
+
+Reader.prototype.of = function(a) {
+  return new Reader(function() {
+    return a;
+  });
+};
+Reader.of = Reader.prototype.of;
+
+Reader.ask = Reader(R.identity);
+
+Reader.prototype.toString = function() {
+  return 'Reader(' + R.toString(this.run) + ')';
+};
+
+Reader.T = function(M) {
+  var ReaderT = function ReaderT(run) {
+    if (!(this instanceof ReaderT)) {
+      return new ReaderT(run);
+    }
+    this.run = run;
+  };
+
+  ReaderT.lift = R.compose(ReaderT, R.always);
+
+  ReaderT.ask = ReaderT(M.of);
+
+  ReaderT.prototype.of = ReaderT.of = function(a) {
+    return ReaderT(function() {
+      return M.of(a);
+    });
+  };
+
+  ReaderT.prototype.chain = function(f) {
+    var readerT = this;
+    return ReaderT(function(e) {
+      var m = readerT.run(e);
+      return m.chain(function(a) {
+        return f(a).run(e);
+      });
+    });
+  };
+
+  ReaderT.prototype.map = function(f) {
+    return this.chain(function(a) {
+      return ReaderT.of(f(a));
+    });
+  };
+
+  ReaderT.prototype.ap = function(a) {
+    var readerT = this;
+    return ReaderT(function(e) {
+      return readerT.run(e).ap(a.run(e));
+    });
+  };
+
+  ReaderT.prototype.equals = function(that) {
+    return this === that ||
+      this.run === that.run ||
+      R.equals(this.run().get(), that.run().get());
+  };
+
+  ReaderT.prototype.toString = function() {
+    return 'ReaderT[' + M.name + '](' + R.toString(this.run) + ')';
+  };
+
+  return ReaderT;
+};
+
+module.exports = Reader;
+var R = require('ramda');
+
+
+function Tuple(x, y) {
+  switch (arguments.length) {
+    case 0:
+      throw new TypeError('no arguments to Tuple');
+    case 1:
+      return function(y) {
+        return new _Tuple(x, y);
+      };
+    default:
+      return new _Tuple(x, y);
+  }
+}
+
+function _Tuple(x, y) {
+  this[0] = x;
+  this[1] = y;
+  this.length = 2;
+}
+
+function ensureConcat(xs) {
+  xs.forEach(function(x) {
+    if (typeof x.concat != 'function') {
+      throw new TypeError(R.toString(x) + ' must be a semigroup to perform this operation');
+    }
+  });
+}
+
+Tuple.fst = function(x) {
+  return x[0];
+};
+
+Tuple.snd = function(x) {
+  return x[1];
+};
+
+// semigroup
+_Tuple.prototype.concat = function(x) {
+  ensureConcat([this[0], this[1]]);
+  return Tuple(this[0].concat(x[0]), this[1].concat(x[1]));
+};
+
+// functor
+_Tuple.prototype.map = function(f) {
+  return Tuple(this[0], f(this[1]));
+};
+
+// apply
+_Tuple.prototype.ap = function(m) {
+  ensureConcat([this[0]]);
+  return Tuple(this[0].concat(m[0]), this[1](m[1]));
+};
+
+// setoid
+_Tuple.prototype.equals = function(that) {
+  return that instanceof _Tuple && R.equals(this[0], that[0]) && R.equals(this[1], that[1]);
+};
+
+_Tuple.prototype.toString = function() {
+  return 'Tuple(' + R.toString(this[0]) + ', ' + R.toString(this[1]) + ')';
+};
+
+module.exports = Tuple;
+var R = require('ramda');
+
+module.exports = R.curryN(3, function lift2(f, a1, a2) {
+  return a1.map(f).ap(a2);
+});
+var R = require('ramda');
+
+module.exports = R.curryN(4, function lift3(f, a1, a2, a3) {
+  return a1.map(f).ap(a2).ap(a3);
+});
